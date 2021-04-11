@@ -3,6 +3,11 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# large files
+Assignment2/cifar-10-python.tar/cifar-10-batches-py/
+Assignment2/Models/*
+
+
 # C extensions
 *.so
 
