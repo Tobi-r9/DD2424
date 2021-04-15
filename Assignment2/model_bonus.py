@@ -34,6 +34,8 @@ class MLP():
         self.init_layers()
         self.train_loss = []
         self.val_loss = []
+        self.train_cost = []
+        self.val_cost = []
         self.train_acc = []
         self.val_acc = []
 
@@ -55,95 +57,146 @@ class MLP():
     def forward(self, X):
 
         X_c = X.copy()
-        for k in range(self.k_layers):
-            X_c = np.maximum(0,self.layers[k].W @ X_c + self.layers[k].b)
-            self.layers[k].x = X_c
+        for l in self.layers:
+            l.x = X_c.copy()
+            X_c = np.maximum(0,l.W @ l.x + l.b)
 
-        return softmax(X_c)
+        return softmax(l.W @ l.x + l.b)
 
     def compute_gradients(self, X, Y, P):
         G = -(Y-P)
         X_c = X.copy()
         nb = X.shape[1]
-        for k in range(self.k_layers-1,0,-1):
-            self.layers[k].grad_W = 1/nb * G @ self.layers[k-1].x.T + 2 * self.lambda_ * self.layers[k].W
-            self.layers[k].grad_b = 1/nb * np.sum(G,axis=1)
-            G = self.layers[k].W.T @ G
-            G = np.multiply(G,np.heaviside(self.layers[k-1].x,0))
+        for l in reversed(self.layers):
+            l.grad_W = 1/nb * G @ l.x.T + 2 * self.lambda_ * l.W
+            l.grad_b = (1/nb * np.sum(G,axis=1)).reshape(l.d_out,1)
+            G = l.W.T @ G
+            G = np.multiply(G,np.heaviside(l.x,0))
         
-        self.layers[0].grad_W = 1/nb * G @ X_c.T +  2 * self.lambda_ * self.layers[0].W
-        self.layers[0].grad_b = 1/nb * np.sum(G,axis=1)
 
 
     def update_params(self, eta):
 
         for k in range(0, self.k_layers):
             self.layers[k].W -= eta * self.layers[k].grad_W
-            self.layers[k].b[:,0] -= eta * self.layers[k].grad_b
+            self.layers[k].b -= eta * self.layers[k].grad_b
 
-    def computeGradientsNum(self, X, Y, h=1e-7):
-        grad_bs, grad_Ws = [], []
+    # def computeGradientsNum(self, X, Y, h=1e-5):
+    #     grad_bs, grad_Ws = [], []
 
-        for j in tqdm(range(self.k_layers)):
-            grad_bs.append(np.zeros(self.layers[j].d_out))
-            for i in range(self.layers[j].d_out):
+    #     for j in tqdm(range(self.k_layers)):
+    #         grad_bs.append(np.zeros(self.layers[j].d_out))
+    #         for i in range(self.layers[j].d_out):
 
-                #self.layers[j].b[i] -= h
-                layers = self.layers
-                layers[j].b[i] -= h
-                c1 = self.computeCost(X, Y, layers)
+    #             self.layers[j].b[i][0] -= h
+    #             _,c1 = self.computeCost(X, Y)
+    #             self.layers[j].b[i][0] += 2 * h
+    #             _,c2 = self.computeCost(X, Y)
 
-                #self.layers[j].b[i] += 2 * h
-                layers = self.layers
-                layers[j].b[i] += h
-                c2 = self.computeCost(X, Y, layers)
+    #             self.layers[j].b[i][0] -= h
+    #             grad_bs[j][i] = (c2 - c1) / (2*h)
 
-                #self.layers[j].b[i] -= h
+    #     for j in tqdm(range(self.k_layers)):
+    #         grad_Ws.append(np.zeros((self.layers[j].d_out, self.layers[j].d_in)))
+    #         for i in range(self.layers[j].d_out):
+    #             for l in range(self.layers[j].d_in):
 
-                grad_bs[j][i] = (c2 - c1) / (2*h)
+    #                 self.layers[j].W[i, l] -= h
+    #                 _,c1 = self.computeCost(X, Y)
 
-        for j in tqdm(range(self.k_layers)):
-            grad_Ws.append(np.zeros((self.layers[j].d_out, self.layers[j].d_in)))
-            for i in range(self.layers[j].d_out):
-                for l in range(self.layers[j].d_in):
-                    layers = self.layers
-                    layers[j].W[i, l] -= h 
-                    c1 = self.computeCost(X, Y, layers)
-
-                    #self.layers[j].W[i, l] += 2*h
-                    layers = self.layers
-                    layers[j].W[i, l] += h 
-                    c2 = self.computeCost(X, Y, layers)
+    #                 self.layers[j].W[i, l] += 2*h
+    #                 _,c2 = self.computeCost(X, Y)
 
                     
-                    #self.layers[j].W[i, l] -= h
+    #                 self.layers[j].W[i, l] -= h
+    #                 grad_Ws[j][i, l] = (c2 - c1) / (2*h)
 
-                    grad_Ws[j][i, l] = (c2 - c1) / (2*h)
+    #     return grad_Ws, grad_bs
 
-        return grad_Ws, grad_bs
+    def computeGradientsNum(self, X_batch, Y_batch, h=1e-5):
+        """ Numerically computes the gradients of the weight and bias parameters
+        Args:
+            X_batch (np.ndarray): data batch matrix (n_dims, n_samples)
+            Y_batch (np.ndarray): one-hot-encoding labels batch vector (n_classes, n_samples)
+            h            (float): marginal offset
+        Returns:
+            grad_W  (np.ndarray): the gradient of the weight parameter
+            grad_b  (np.ndarray): the gradient of the bias parameter
+        """
+        grads = {}
+        for j, layer in enumerate(self.layers):
+            selfW = layer.W
+            selfB = layer.b
+            grads['W' + str(j)] = np.zeros(selfW.shape)
+            grads['b' + str(j)] = np.zeros(selfB.shape)
 
-    def compareGradients(self, X, Y, eps=1e-10, h=1e-7):
+            b_try = np.copy(selfB)
+            for i in range(selfB.shape[0]):
+                layer.b = np.copy(b_try)
+                layer.b[i] += h
+                _, c1 = self.computeCost(X_batch, Y_batch)
+                layer.b = np.copy(b_try)
+                layer.b[i] -= h
+                _, c2 = self.computeCost(X_batch, Y_batch)
+                grads['b' + str(j)][i] = (c1-c2) / (2*h)
+            layer.b = b_try
+
+            W_try = np.copy(selfW)
+            for i in np.ndindex(selfW.shape):
+                layer.W = np.copy(W_try)
+                layer.W[i] += h
+                _, c1 = self.computeCost(X_batch, Y_batch)
+                layer.W = np.copy(W_try)
+                layer.W[i] -= h
+                _, c2 = self.computeCost(X_batch, Y_batch)
+                grads['W' + str(j)][i] = (c1-c2) / (2*h)
+            layer.W = W_try
+
+        return grads
+
+    # def compareGradients(self, X, Y, eps=1e-10, h=1e-5):
+    #     """ Compares analytical and numerical gradients given a certain epsilon """
+    #     gn_Ws, gn_bs = self.computeGradientsNum(X, Y, h)
+    #     rerr_w, rerr_b = [], []
+    #     aerr_w, aerr_b = [], []
+
+    #     for i in range(self.k_layers):
+    #         rerr_w.append(rel_error(self.layers[i].grad_W, gn_Ws[i], eps))
+    #         rerr_b.append(rel_error(self.layers[i].grad_b, gn_bs[i], eps))
+    #         aerr_w.append(np.mean(abs(self.layers[i].grad_W - gn_Ws[i])))
+    #         aerr_b.append(np.mean(abs(self.layers[i].grad_b - gn_bs[i])))
+
+    #     return rerr_w, rerr_b, aerr_w, aerr_b
+
+    def compareGradients(self, X, Y, eps=1e-10, h=1e-5):
         """ Compares analytical and numerical gradients given a certain epsilon """
-        gn_Ws, gn_bs = self.computeGradientsNum(X, Y, h)
+        gn = self.computeGradientsNum(X, Y, h)
         rerr_w, rerr_b = [], []
         aerr_w, aerr_b = [], []
 
-        for i in range(self.k_layers):
-            rerr_w.append(rel_error(self.layers[i].grad_W, gn_Ws[i], eps))
-            rerr_b.append(rel_error(self.layers[i].grad_b, gn_bs[i], eps))
-            aerr_w.append(np.mean(abs(self.layers[i].grad_W - gn_Ws[i])))
-            aerr_b.append(np.mean(abs(self.layers[i].grad_b - gn_bs[i])))
+        def _rel_error(x, y, eps): return np.abs(
+            x-y)/max(eps, np.abs(x)+np.abs(y))
+
+        def rel_error(g1, g2, eps):
+            vfunc = np.vectorize(_rel_error)
+            return np.mean(vfunc(g1, g2, eps))
+
+        for i, layer in enumerate(self.layers):
+            rerr_w.append(rel_error(layer.grad_W, gn[f'W{i}'], eps))
+            rerr_b.append(rel_error(layer.grad_b, gn[f'b{i}'], eps))
+            aerr_w.append(np.mean(abs(layer.grad_W - gn[f'W{i}'])))
+            aerr_b.append(np.mean(abs(layer.grad_b - gn[f'b{i}'])))
 
         return rerr_w, rerr_b, aerr_w, aerr_b
 
     def computeCost(self, X, Y):
-        """ Computes the cost function: cross entropy loss + L2 regularization """
+
         P = self.forward(X)
-        l = -np.log(np.sum(np.multiply(Y, P), axis=0))
-        r = np.sum([np.linalg.norm(self.layers[i].W)
-                    **2 for i in range(self.k_layers)])
-        J = np.sum(l)/X.shape[1] + self.lambda_ * r
-        return J
+        loss = np.log(np.sum(np.multiply(Y, P), axis=0))
+        loss = - np.sum(loss)/X.shape[1]
+        r = np.sum([np.linalg.norm(layer.W) ** 2 for layer in self.layers])
+        cost = loss + self.lambda_ * r
+        return loss, cost
 
     def ComputeAccuracy(self,X,y):
         p = self.forward(X)
@@ -187,7 +240,7 @@ class MLP():
 
         return hist
 
-    def cyclicLearning(self,data, GDparams, experiment, verbose, save):
+    def cyclicLearning(self,data, GDparams, experiment, build_ensemble,augment, verbose, save):
 
         X_train,Y_train,y_train = data['X_train'], data['Y_train'], data['y_train']
         X_val,Y_val,y_val = data['X_val'], data['Y_val'], data['y_val']
@@ -204,15 +257,21 @@ class MLP():
 
         eta = eta_min
         t = 0
+        cycle = 0
 
         for e in tqdm(range(epochs)):
             X_train, Y_train, y_train = shuffle(X_train.T, Y_train.T, y_train, random_state=e)
             X_train = X_train.T
             Y_train = Y_train.T
             for i in range(l):
+                X_batch = X_train[:,i*(n_batch):(i+1)*n_batch].copy()
+                Y_batch = Y_train[:,i*(n_batch):(i+1)*n_batch].copy()
+                if augment:
+                    r = np.random.rand()
+                    X_batch =  augment_data(X_batch,r)
 
-                p = self.forward(X_train[:,i*(n_batch):(i+1)*n_batch])
-                self.compute_gradients(X_train[:,i*(n_batch):(i+1)*n_batch],Y_train[:,i*(n_batch):(i+1)*n_batch],p)
+                p = self.forward(X_batch)
+                self.compute_gradients(X_batch,Y_batch,p)
                 self.update_params(eta)
 
                 if t % (2*ns/freq) == 0:
@@ -224,65 +283,100 @@ class MLP():
                     eta = eta_max - (t - ns)/ns * (eta_max - eta_min)
         
                 t = (t+1) % (2*ns)
+                if t == 0 and build_ensemble:
+
+                    self.save({},GDparams, experiment,True, cycle=cycle)
+                    cycle += 1
 
 
         train_loss_ = np.array(self.train_loss)
         val_loss_ = np.array(self.val_loss)
         train_acc_ = np.array(self.train_acc)
         val_acc_ = np.array(self.val_acc)
-        hist = {'train_loss':train_loss_, 'val_loss':val_loss_, 'train_acc':train_acc_, 'val_acc':val_acc_}
+        train_cost_ = np.array(self.train_cost)
+        val_cost_ = np.array(self.val_cost)
+        hist = {'train_loss':train_loss_, 'val_loss':val_loss_, 'train_acc':train_acc_, 'val_acc':val_acc_,'val_cost':val_cost,'train_cost':train_cost}
         if save:
             self.save(hist,GDparams, experiment,True)
 
-    def save(self, hist, GDparams, experiment,cyclic):
+    def lr_range_test(self, data, GDparams, freq=20):
+
+        X_train, Y_train, y_train = data["X_train"], data["Y_train"], data["y_train"]
+        X_val, y_val =  data["X_val"], data["y_val"],
+
+        n = X_train.shape[1]
+
+        epochs = GDparams["epochs"]
+        n_batch = GDparams["n_batch"]
+        eta_min = GDparams["eta_min"]
+        eta_max = GDparams["eta_max"]
+        iterations = int(n/n_batch)
+        delta_eta = (eta_max - eta_min) / (iterations * epochs) * freq
+        eta = eta_min
+        etas = [eta]
+
+
+        v_acc = self.compute_accuracy(X_val, y_val)
+        self.val_acc.append(v_acc)
+
+        for epoch in tqdm(range(epochs)):
+
+            X_train, Y_train, y_train = shuffle(X_train.T, Y_train.T, y_train.T, random_state=epoch)
+            X_train, Y_train, y_train = X_train.T, Y_train.T, y_train.T
+
+            for i in range(iterations):
+                p = self.forward(X_train[:,i*(n_batch):(i+1)*n_batch])
+                self.compute_gradients(X_train[:,i*(n_batch):(i+1)*n_batch],Y_train[:,i*(n_batch):(i+1)*n_batch],p)
+                self.update_params(eta)
+
+                if i % freq == 0:
+                    eta += delta_eta
+                    etas.append(eta)
+
+                    v_acc = self.compute_accuracy(X_val, y_val)
+                    self.val_acc.append(v_acc)
+
+        return etas, self.val_acc
+
+    def save(self, hist, GDparams, experiment,cyclic,cycle=-1):
         n_batch = GDparams['n_batch']
         if cyclic:
             eta_min, eta_max = GDparams['eta_min'], GDparams['eta_max']
             ns = GDparams["ns"]
             n_cycles = GDparams['n_cycles']
             freq = GDparams['freq']
-            
-            np.save(f"Models/hist_{experiment}_{ns}_{n_cycles}_{n_batch}_{eta_min}_{eta_max}_{self.lambda_}_{freq}_{self.seed}.npy",hist)
-            np.save(f"Models/layers_{experiment}_{ns}_{n_cycles}_{n_batch}_{eta_min}_{eta_max}_{self.lambda_}_{freq}_{self.seed}.npy",self.layers)
+            if (cycle >=0):
+                np.save(f"Models/bonus/layers_{experiment}_{ns}_{n_cycles}_{n_batch}_{eta_min}_{eta_max}_{self.lambda_}_{freq}_{self.seed}_{cycle}.npy",self.layers)
+            else:
+                np.save(f"Models/bonus/hist_{experiment}_{ns}_{n_cycles}_{n_batch}_{eta_min}_{eta_max}_{self.lambda_}_{freq}_{self.seed}.npy",hist)
+                np.save(f"Models/bonus/layers_{experiment}_{ns}_{n_cycles}_{n_batch}_{eta_min}_{eta_max}_{self.lambda_}_{freq}_{self.seed}.npy",self.layers)
         else:
             epochs = GDparams['epochs']
             eta = GDparams['eta']
-            np.save(f"Models/hist_{experiment}_{epochs}_{n_batch}_{eta}_{self.lambda_}_{self.seed}.npy",hist)
-            np.save(f"Models/layers_{experiment}_{epochs}_{n_batch}_{eta}_{self.lambda_}_{self.seed}.npy",self.layers)
-
-    def plot_history(self,hist,metric):
-
-        if metric == 'loss':
-            plt.plot(hist['train_loss'])
-            plt.plot(hist['val_loss'])
-            plt.xlabel('epoch')
-            plt.ylabel('loss')
-            plt.legend(['train_loss', 'val_loss'])
-        elif metric == 'acc':
-            plt.plot(hist['train_acc'])
-            plt.plot(hist['val_acc'])
-            plt.xlabel('epoch')
-            plt.ylabel('accuracy')
-            plt.legend(['train_acc', 'val_acc'])
-        plt.show()
+            np.save(f"Models/bonus/hist_{experiment}_{epochs}_{n_batch}_{eta}_{self.lambda_}_{self.seed}.npy",hist)
+            np.save(f"Models/bonus/layers_{experiment}_{epochs}_{n_batch}_{eta}_{self.lambda_}_{self.seed}.npy",self.layers)
 
 
     def history(self,data, eps, verbose):
         X_train,Y_train,y_train = data['X_train'], data['Y_train'], data['y_train']
         X_val,Y_val,y_val = data['X_val'], data['Y_val'], data['y_val']
-        t_loss = self.computeCost(X_train,Y_train)
-        v_loss = self.computeCost(X_val,Y_val)
+        t_loss, t_cost  = self.computeCost(X_train,Y_train)
+        v_loss, v_cost = self.computeCost(X_val,Y_val)
         t_acc = self.ComputeAccuracy(X_train,y_train)
         v_acc = self.ComputeAccuracy(X_val,y_val)
         self.train_loss.append(t_loss)
         self.val_loss.append(v_loss)
+        self.train_cost.append(t_cost)
+        self.val_cost.append(v_cost)
         self.train_acc.append(t_acc)
         self.val_acc.append(v_acc)
         if verbose:
-            print(f"\t Epoch {eps}: train_loss = {t_loss}, val_loss = {v_loss},  \n \t train_acc = {t_acc}, val_acc = {v_acc}")
+            print(f"\t Epoch {eps}: train_cost = {t_cost}, val_cost = {v_cost},  \n \t train_acc = {t_acc}, val_acc = {v_acc}")
+
+#####################################################################
+# utilities
 
 _rel_error = lambda x,y,eps: np.abs(x-y)/max(eps,np.abs(x)+np.abs(y))
-
 
 def rel_error(g1, g2, eps):
     vfunc = np.vectorize(_rel_error)
@@ -292,64 +386,44 @@ def softmax(x):
     """ Standard definition of the softmax function """
     return np.exp(x) / np.sum(np.exp(x), axis=0)
 
-class Search():
+def augment_data(X, flip=0, sigma=1):
+        X_new = np.copy(X) 
+        noise = np.random.normal(0, sigma, (X.shape))
+        X_new += noise
+        mean, std = np.mean(X_new, axis=1), np.std(X_new, axis = 1)
+        X_new -= np.outer(mean, np.ones(X_new.shape[1]))
+        X_new /= np.outer(std, np.ones(X.shape[1]))
+        d, n_batch = X.shape
+        if flip > 0.5:
+            X_new = X_new.reshape(n_batch, 3, 32, 32).transpose(0, 2, 3, 1)
+            X_new = np.array([np.fliplr(X_new[i]) for i in range(n_batch)])
+            X_new = X_new.reshape((d, n_batch))
+        return X_new
 
-    def __init__(self, l_min, l_max,n_lambda, p1,params1,p2,params2):
-        self.l_min = l_min
-        self.l_max = l_max
-        self.params1 = params1
-        self.params2 = params2
-        self.p1 = p1
-        self.p2 = p2
-        self.n_lambda = n_lambda
-        self.lambdas = []
-        self.models = {}
+def load_network(GDparams,experiment,cyclic,cycle=-1):
+    seed = GDparams['seed']
+    n_batch = GDparams['n_batch']
+    lambda_ = GDparams['lambda']
+    if cyclic:
+        eta_min, eta_max = GDparams['eta_min'], GDparams['eta_max']
+        ns = GDparams["ns"]
+        n_cycles = GDparams['n_cycles']
+        freq = GDparams['freq']
 
-    def sample_lambda(self):
-        r = self.l_min + (self.l_max - self.l_min)*np.random.rand(self.n_lambda[0])
-        self.lambdas = [10**i for i in r]
+        if cycle >=0:
+            layers = np.load(f"Models/bonus/layers_{experiment}_{ns}_{n_cycles}_{n_batch}_{eta_min}_{eta_max}_{lambda_}_{freq}_{seed}_{cycle}.npy")
+            hist = None
+        else:
+            hist = np.load(f"Models/bonus/hist_{experiment}_{ns}_{n_cycles}_{n_batch}_{eta_min}_{eta_max}_{lambda_}_{freq}_{seed}.npy")
+            layers = np.load(f"Models/bonus/layers_{experiment}_{ns}_{n_cycles}_{n_batch}_{eta_min}_{eta_max}_{lambda_}_{freq}_{seed}.npy")
+    else:
+        epochs = GDparams['epochs']
+        eta = GDparams['eta']
+        hist = np.load(f"Models/bonus/hist_{experiment}_{epochs}_{n_batch}_{eta}_{lambda_}_{seed}.npy")
+        layers = np.load(f"Models/bonus/layers_{experiment}_{epochs}_{n_batch}_{eta}_{lambda_}_{seed}.npy")
 
-    def random_search(self,data,GDparams):
+    return layers, hist
 
-        self.sample_lambda()
-        for t, num in enumerate(self.n_lambda):
-            for lmda in self.lambdas:
-
-                if self.params1 and self.params2:
-                    self.grid_search(data, GDparams, lmda)
-
-                else:
-                    mlp = MLP(lambda_=lmda)
-                    hist = mlp.cyclicLearning(data, GDparams, 'lambda_search', False, False)
-                    self.models.update({mlp.val_acc[-1]:mlp})
-            try:
-                n = self.n_lambda[t+1]
-            except:
-                n = 3
-            self.update_lambda(n=n)
-
-        max_key = max(self.models.keys())
-        return self.models[max_key]
-
-
-    def grid_search(self, data, GDparams, lmda):
-
-        for param1 in self.params1:
-            for param2 in self.params2:
-                GDparams[self.p1] = param1
-                GDparams[self.p2] = param2
-                mlp = MLP(lambda_=lmda)
-                hist = mlp.cyclicLearning(data, GDparams, 'grid_search', False, False)
-                self.models.update({mlp.val_acc[-1]:mlp})
-
-
-    def update_lambda(self,n,_min=1e-2,_max=1e-2):
-        key = max(self.models.keys())
-        lba = self.models[key].lambda_
-        l_min_ = lba-_min
-        l_max_ = lba+_max
-        r = l_min_ + ((l_max_ - l_min_)*np.random.rand(n))
-        self.lambdas = [lmbda for lmbda in r]
         
 
     

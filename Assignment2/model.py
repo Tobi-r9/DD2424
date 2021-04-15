@@ -8,8 +8,6 @@ from collections import namedtuple
 import utilis as u
 from sklearn.utils import shuffle
 
-Layer = namedtuple('Layer', ['d_in', 'd_out', 'W',
-                             'b', 'grad_W', 'grad_b', 'X'])
 
 class Layer():
 
@@ -283,7 +281,9 @@ class MLP():
         val_loss_ = np.array(self.val_loss)
         train_acc_ = np.array(self.train_acc)
         val_acc_ = np.array(self.val_acc)
-        hist = {'train_loss':train_loss_, 'val_loss':val_loss_, 'train_acc':train_acc_, 'val_acc':val_acc_}
+        train_cost_ = np.array(self.train_cost)
+        val_cost_ = np.array(self.val_cost)
+        hist = {'train_loss':train_loss_, 'val_loss':val_loss_, 'train_acc':train_acc_, 'val_acc':val_acc_,'train_cost':train_cost_,'val_cost':val_cost_}
         if save:
             self.save(hist,GDparams, experiment,True)
 
@@ -366,6 +366,36 @@ class LambdaSearch():
 
         
 
-    
+def load_network(GDparams,experiment,cyclic,cycle=-1):
+    seed = GDparams['seed']
+    n_batch = GDparams['n_batch']
+    lambda_ = GDparams['lambda']
+    if cyclic:
+        eta_min, eta_max = GDparams['eta_min'], GDparams['eta_max']
+        ns = GDparams["ns"]
+        n_cycles = GDparams['n_cycles']
+        freq = GDparams['freq']
 
+        if cycle >=0:
+            layers = np.load(f"Models/layers_{experiment}_{ns}_{n_cycles}_{n_batch}_{eta_min}_{eta_max}_{lambda_}_{freq}_{seed}_{cycle}.npy",allow_pickle=True)
+            hist = None
+        else:
+            hist = np.load(f"Models/hist_{experiment}_{ns}_{n_cycles}_{n_batch}_{eta_min}_{eta_max}_{lambda_}_{freq}_{seed}.npy",allow_pickle=True)
+            layers = np.load(f"Models/layers_{experiment}_{ns}_{n_cycles}_{n_batch}_{eta_min}_{eta_max}_{lambda_}_{freq}_{seed}.npy",allow_pickle=True)
+    else:
+        epochs = GDparams['epochs']
+        eta = GDparams['eta']
+        hist = np.load(f"Models/hist_{experiment}_{epochs}_{n_batch}_{eta}_{lambda_}_{seed}.npy",allow_pickle=True)
+        layers = np.load(f"Models/layers_{experiment}_{epochs}_{n_batch}_{eta}_{lambda_}_{seed}.npy",allow_pickle=True)
 
+    return layers, hist
+
+def get_test_acc(X_test,y_test,layers):
+    X_c = X_test.copy()
+    for l in layers:
+        l.x = X_c.copy()
+        X_c = np.maximum(0,l.W @ l.x + l.b)
+    p = softmax(l.W @ l.x + l.b)
+    y_hat = np.argmax(p,axis=0)
+    acc = np.sum(y_hat == y_test)
+    return acc/len(y_test)
