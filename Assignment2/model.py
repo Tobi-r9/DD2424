@@ -79,113 +79,52 @@ class MLP():
             self.layers[k].W -= eta * self.layers[k].grad_W
             self.layers[k].b -= eta * self.layers[k].grad_b
 
-    # def computeGradientsNum(self, X, Y, h=1e-5):
-    #     grad_bs, grad_Ws = [], []
+    def computeGradientsNum(self, X, Y, h=1e-5):
+        grad_bs, grad_Ws = [], []
 
-    #     for j in tqdm(range(self.k_layers)):
-    #         grad_bs.append(np.zeros(self.layers[j].d_out))
-    #         for i in range(self.layers[j].d_out):
+        for j in tqdm(range(self.k_layers)):
+            grad_bs.append(np.zeros(self.layers[j].d_out))
+            for i in range(self.layers[j].d_out):
 
-    #             self.layers[j].b[i][0] -= h
-    #             _,c1 = self.computeCost(X, Y)
-    #             self.layers[j].b[i][0] += 2 * h
-    #             _,c2 = self.computeCost(X, Y)
+                self.layers[j].b[i][0] -= h
+                _,c1 = self.computeCost(X, Y)
+                self.layers[j].b[i][0] += 2 * h
+                _,c2 = self.computeCost(X, Y)
 
-    #             self.layers[j].b[i][0] -= h
-    #             grad_bs[j][i] = (c2 - c1) / (2*h)
+                self.layers[j].b[i][0] -= h
+                grad_bs[j][i] = (c2 - c1) / (2*h)
 
-    #     for j in tqdm(range(self.k_layers)):
-    #         grad_Ws.append(np.zeros((self.layers[j].d_out, self.layers[j].d_in)))
-    #         for i in range(self.layers[j].d_out):
-    #             for l in range(self.layers[j].d_in):
+        for j in tqdm(range(self.k_layers)):
+            grad_Ws.append(np.zeros((self.layers[j].d_out, self.layers[j].d_in)))
+            for i in range(self.layers[j].d_out):
+                for l in range(self.layers[j].d_in):
 
-    #                 self.layers[j].W[i, l] -= h
-    #                 _,c1 = self.computeCost(X, Y)
+                    self.layers[j].W[i, l] -= h
+                    _,c1 = self.computeCost(X, Y)
 
-    #                 self.layers[j].W[i, l] += 2*h
-    #                 _,c2 = self.computeCost(X, Y)
+                    self.layers[j].W[i, l] += 2*h
+                    _,c2 = self.computeCost(X, Y)
 
                     
-    #                 self.layers[j].W[i, l] -= h
-    #                 grad_Ws[j][i, l] = (c2 - c1) / (2*h)
+                    self.layers[j].W[i, l] -= h
+                    grad_Ws[j][i, l] = (c2 - c1) / (2*h)
 
-    #     return grad_Ws, grad_bs
+        return grad_Ws, grad_bs
 
-    def computeGradientsNum(self, X_batch, Y_batch, h=1e-5):
-        """ Numerically computes the gradients of the weight and bias parameters
-        Args:
-            X_batch (np.ndarray): data batch matrix (n_dims, n_samples)
-            Y_batch (np.ndarray): one-hot-encoding labels batch vector (n_classes, n_samples)
-            h            (float): marginal offset
-        Returns:
-            grad_W  (np.ndarray): the gradient of the weight parameter
-            grad_b  (np.ndarray): the gradient of the bias parameter
-        """
-        grads = {}
-        for j, layer in enumerate(self.layers):
-            selfW = layer.W
-            selfB = layer.b
-            grads['W' + str(j)] = np.zeros(selfW.shape)
-            grads['b' + str(j)] = np.zeros(selfB.shape)
-
-            b_try = np.copy(selfB)
-            for i in range(selfB.shape[0]):
-                layer.b = np.copy(b_try)
-                layer.b[i] += h
-                _, c1 = self.computeCost(X_batch, Y_batch)
-                layer.b = np.copy(b_try)
-                layer.b[i] -= h
-                _, c2 = self.computeCost(X_batch, Y_batch)
-                grads['b' + str(j)][i] = (c1-c2) / (2*h)
-            layer.b = b_try
-
-            W_try = np.copy(selfW)
-            for i in np.ndindex(selfW.shape):
-                layer.W = np.copy(W_try)
-                layer.W[i] += h
-                _, c1 = self.computeCost(X_batch, Y_batch)
-                layer.W = np.copy(W_try)
-                layer.W[i] -= h
-                _, c2 = self.computeCost(X_batch, Y_batch)
-                grads['W' + str(j)][i] = (c1-c2) / (2*h)
-            layer.W = W_try
-
-        return grads
-
-    # def compareGradients(self, X, Y, eps=1e-10, h=1e-5):
-    #     """ Compares analytical and numerical gradients given a certain epsilon """
-    #     gn_Ws, gn_bs = self.computeGradientsNum(X, Y, h)
-    #     rerr_w, rerr_b = [], []
-    #     aerr_w, aerr_b = [], []
-
-    #     for i in range(self.k_layers):
-    #         rerr_w.append(rel_error(self.layers[i].grad_W, gn_Ws[i], eps))
-    #         rerr_b.append(rel_error(self.layers[i].grad_b, gn_bs[i], eps))
-    #         aerr_w.append(np.mean(abs(self.layers[i].grad_W - gn_Ws[i])))
-    #         aerr_b.append(np.mean(abs(self.layers[i].grad_b - gn_bs[i])))
-
-    #     return rerr_w, rerr_b, aerr_w, aerr_b
 
     def compareGradients(self, X, Y, eps=1e-10, h=1e-5):
-        """ Compares analytical and numerical gradients given a certain epsilon """
-        gn = self.computeGradientsNum(X, Y, h)
+        gn_Ws, gn_bs = self.computeGradientsNum(X, Y, h)
         rerr_w, rerr_b = [], []
         aerr_w, aerr_b = [], []
 
-        def _rel_error(x, y, eps): return np.abs(
-            x-y)/max(eps, np.abs(x)+np.abs(y))
-
-        def rel_error(g1, g2, eps):
-            vfunc = np.vectorize(_rel_error)
-            return np.mean(vfunc(g1, g2, eps))
-
-        for i, layer in enumerate(self.layers):
-            rerr_w.append(rel_error(layer.grad_W, gn[f'W{i}'], eps))
-            rerr_b.append(rel_error(layer.grad_b, gn[f'b{i}'], eps))
-            aerr_w.append(np.mean(abs(layer.grad_W - gn[f'W{i}'])))
-            aerr_b.append(np.mean(abs(layer.grad_b - gn[f'b{i}'])))
+        for i in range(self.k_layers):
+            rerr_w.append(rel_error(self.layers[i].grad_W, gn_Ws[i], eps))
+            rerr_b.append(rel_error(self.layers[i].grad_b, gn_bs[i], eps))
+            aerr_w.append(np.mean(abs(self.layers[i].grad_W - gn_Ws[i])))
+            aerr_b.append(np.mean(abs(self.layers[i].grad_b - gn_bs[i])))
 
         return rerr_w, rerr_b, aerr_w, aerr_b
+
 
     def computeCost(self, X, Y):
 
@@ -341,7 +280,8 @@ class LambdaSearch():
         self.models = {}
 
     def sample_lambda(self):
-        self.lambdas = np.linspace(self.l_min,self.l_max,self.n_lambda)
+        intervall = np.linspace(self.l_min,self.l_max,self.n_lambda)
+        self.lambdas = [10**(i) for i in intervall]
 
     def lambda_search(self,data,GDparams):
 
@@ -349,7 +289,7 @@ class LambdaSearch():
         for lmda in self.lambdas:
             mlp = MLP(lambda_=lmda)
             hist = mlp.cyclicLearning(data, GDparams, 'lambda_search', False, False)
-            self.models.update({mlp.val_acc[-1]:mlp})
+            self.models.update({np.max(mlp.val_acc):mlp})
 
         return self.models
 

@@ -295,7 +295,7 @@ class MLP():
         val_acc_ = np.array(self.val_acc)
         train_cost_ = np.array(self.train_cost)
         val_cost_ = np.array(self.val_cost)
-        hist = {'train_loss':train_loss_, 'val_loss':val_loss_, 'train_acc':train_acc_, 'val_acc':val_acc_,'val_cost':val_cost,'train_cost':train_cost}
+        hist = {'train_loss':train_loss_, 'val_loss':val_loss_, 'train_acc':train_acc_, 'val_acc':val_acc_,'val_cost':val_cost_,'train_cost':train_cost_}
         if save:
             self.save(hist,GDparams, experiment,True)
 
@@ -411,21 +411,47 @@ def load_network(GDparams,experiment,cyclic,cycle=-1):
         freq = GDparams['freq']
 
         if cycle >=0:
-            layers = np.load(f"Models/bonus/layers_{experiment}_{ns}_{n_cycles}_{n_batch}_{eta_min}_{eta_max}_{lambda_}_{freq}_{seed}_{cycle}.npy")
+            layers = np.load(f"Models/bonus/layers_{experiment}_{ns}_{n_cycles}_{n_batch}_{eta_min}_{eta_max}_{lambda_}_{freq}_{seed}_{cycle}.npy",allow_pickle=True)
             hist = None
         else:
-            hist = np.load(f"Models/bonus/hist_{experiment}_{ns}_{n_cycles}_{n_batch}_{eta_min}_{eta_max}_{lambda_}_{freq}_{seed}.npy")
-            layers = np.load(f"Models/bonus/layers_{experiment}_{ns}_{n_cycles}_{n_batch}_{eta_min}_{eta_max}_{lambda_}_{freq}_{seed}.npy")
+            hist = np.load(f"Models/bonus/hist_{experiment}_{ns}_{n_cycles}_{n_batch}_{eta_min}_{eta_max}_{lambda_}_{freq}_{seed}.npy",allow_pickle=True)
+            layers = np.load(f"Models/bonus/layers_{experiment}_{ns}_{n_cycles}_{n_batch}_{eta_min}_{eta_max}_{lambda_}_{freq}_{seed}.npy",allow_pickle=True)
     else:
         epochs = GDparams['epochs']
         eta = GDparams['eta']
-        hist = np.load(f"Models/bonus/hist_{experiment}_{epochs}_{n_batch}_{eta}_{lambda_}_{seed}.npy")
-        layers = np.load(f"Models/bonus/layers_{experiment}_{epochs}_{n_batch}_{eta}_{lambda_}_{seed}.npy")
+        hist = np.load(f"Models/bonus/hist_{experiment}_{epochs}_{n_batch}_{eta}_{lambda_}_{seed}.npy",allow_pickle=True)
+        layers = np.load(f"Models/bonus/layers_{experiment}_{epochs}_{n_batch}_{eta}_{lambda_}_{seed}.npy",allow_pickle=True)
 
     return layers, hist
 
         
+def get_test_acc(X_test,y_test,layers):
+    X_c = X_test.copy()
+    for l in layers:
+        l.x = X_c.copy()
+        X_c = np.maximum(0,l.W @ l.x + l.b)
+    p = softmax(l.W @ l.x + l.b)
+    y_hat = np.argmax(p,axis=0)
+    acc = np.sum(y_hat == y_test)
+    return acc/len(y_test)
 
+def ensemble_classification(X_test,y_test,models):
+    y = 20*np.ones(y_test.shape)
+    predictions = np.zeros(y_test.shape)
+    for model in models:
+        X_c = X_test.copy()
+        for layer in model:
+            layer.x = X_c.copy()
+            X_c = np.maximum(0,layer.W @ layer.x + layer.b)
+        p = softmax(layer.W @ layer.x + layer.b)
+        y_hat = np.argmax(p,axis=0)
+        y = np.vstack((y,y_hat))
+    for i,pred in enumerate(y.T):
+        pred = np.array([int(p) for p in pred])
+        counts = np.bincount(pred)
+        predictions[i] = np.argmax(counts)
+    acc = np.sum(predictions == y_test)
+    return acc/len(y_test)
     
 
 
