@@ -299,7 +299,7 @@ class MLP():
         if save:
             self.save(hist,GDparams, experiment,True)
 
-    def lr_range_test(self, data, GDparams, freq=20):
+    def find_etas(self, data, GDparams, freq=20):
 
         X_train, Y_train, y_train = data["X_train"], data["Y_train"], data["y_train"]
         X_val, y_val =  data["X_val"], data["y_val"],
@@ -316,7 +316,7 @@ class MLP():
         etas = [eta]
 
 
-        v_acc = self.compute_accuracy(X_val, y_val)
+        v_acc = self.ComputeAccuracy(X_val, y_val)
         self.val_acc.append(v_acc)
 
         for epoch in tqdm(range(epochs)):
@@ -333,10 +333,12 @@ class MLP():
                     eta += delta_eta
                     etas.append(eta)
 
-                    v_acc = self.compute_accuracy(X_val, y_val)
+                    v_acc = self.ComputeAccuracy(X_val, y_val)
                     self.val_acc.append(v_acc)
+            
+        hist = {'etas':etas, 'val_acc':self.val_acc}
 
-        return etas, self.val_acc
+        return hist
 
     def save(self, hist, GDparams, experiment,cyclic,cycle=-1):
         n_batch = GDparams['n_batch']
