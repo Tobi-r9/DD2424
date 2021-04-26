@@ -11,7 +11,7 @@ from sklearn.utils import shuffle
 
 class Layer():
 
-    def __init__(self, d_in, d_out, W, b, grad_W, grad_b, x, alpha):
+    def __init__(self, d_in, d_out, W, b, grad_W, grad_b, x, alpha=0.9):
         self.d_in = d_in
         self.d_out = d_out
         self.W = W
@@ -21,6 +21,8 @@ class Layer():
         self.x = x
         self.mu = np.zeros((self.d_out, 1))
         self.sigma = np.zeros((self.d_out, 1))
+        self.mu_avg = None
+        self.sigma_avg = None
         self.alpha = alpha
         self.gamma = np.ones((self.d_out, 1))
         self.grad_gamma = 0
@@ -31,17 +33,30 @@ class Layer():
         self.eps = np.finfo(np.float64).eps
         
 
-    def batchnorm(self, s1):
-        s2 = (s1 - self.mu)/np.sqrt(self.sigma +self.eps)
-        s2 = np.multiply(self.gamma,s2) + self.beta
+    def batchnorm(self, s1,trainMode):
+        n = self.x.shape[1]
+
+        if trainMode:
+            self.mu = np.mean(s1,axis=1, keepdims=True)
+            self.sigma = np.var(s1, axis=1, keepdims=True) * ((n-1)/n)
+            s2 = (s1 - self.mu)/np.sqrt(self.sigma +self.eps)
+            s2 = np.multiply(self.gamma,s2) + self.beta
+
+            #if not initialized before
+            if self.mu_avg is None:
+                self.mu_avg = self.alpha * self.mu + (1-self.alpha) * self.mu
+                self.sigma_avg = self.alpha * self.sigma + (1-self.alpha) * self.sigma
+
+            else:
+                self.mu_avg = self.alpha * self.mu_avg + (1-self.alpha) * self.mu
+                self.sigma_avg = self.alpha * self.sigma_avg + (1-self.alpha) * self.sigma
+
+        #test time
+        else:
+            s2 = (s1 - self.mu_avg)/np.sqrt(self.sigma_avg +self.eps)
+            s2 = np.multiply(self.gamma,s2) + self.beta
         return s2
 
-    def update_norm_params(self):
-        n = self.x.shape[1]
-        mu = np.mean(self.s1,axis=1, keepdims=True)
-        var = np.var(self.s1, axis=1, keepdims=True) * ((n-1)/n)
-        self.mu = self.alpha * self.mu + (1-self.alpha) * mu
-        self.sigma = self.alpha * self.sigma + (1-self.alpha) * var
 
     def BatchNomBackPass(self,G):
         n = self.x.shape[1]
@@ -49,18 +64,18 @@ class Layer():
         sigma2 = np.power(self.sigma + self.eps,-1.5)
         G1 = np.multiply(G,sigma1)
         G2 = np.multiply(G,sigma2)
-        D = self.s2 - self.mu
-        c = np.sum(np.multiply(G,D),axis=1,keepdims=True)
+        D = self.s1 - self.mu
+        c = np.sum(np.multiply(G2,D),axis=1,keepdims=True)
         G = G1 - 1/n * np.sum(G1,axis=1,keepdims=True) - 1/n * np.multiply(D,c)
         return G
 
 class MLP():
 
-    def __init__(self, dimensions=[3072,50,10], k_layers=2, lambda_=0, seed=42):
+    def __init__(self, dimensions=[3072,50,10], lambda_=0, seed=42):
         np.random.seed(seed)
         self.seed = seed
         self.dimensions = dimensions
-        self.k_layers = k_layers
+        self.k_layers = len(dimensions)-1
         self.lambda_ = lambda_
         self.layers = []
         self.init_layers()
@@ -80,13 +95,11 @@ class MLP():
             grad_W = np.zeros((d_out, d_in))
             grad_b = np.zeros((d_out,1))
             x = 0
-            alpha = 0.7
-            layer = Layer(d_in, d_out, W, b, grad_W, grad_b, x, alpha)
+            layer = Layer(d_in, d_out, W, b, grad_W, grad_b, x)
 
             self.layers.append(layer)
         
        
-
     def forward(self, X):
 
         X_c = X.copy()
@@ -105,7 +118,7 @@ class MLP():
             layer.x = X_c.copy()
             if i != len(self.layers)-1:
                 s1 = layer.W @ layer.x + layer.b
-                s2 = layer.batchnorm(s1)
+                s2 = layer.batchnorm(s1,trainMode)
                 X_c = np.maximum(0,s2)
 
                 if trainMode:
@@ -115,6 +128,7 @@ class MLP():
         return softmax(layer.W @ layer.x + layer.b)
 
     def compute_gradients(self, X, Y, P):
+        
         G = -(Y-P)
         X_c = X.copy()
         nb = X.shape[1]
@@ -132,11 +146,11 @@ class MLP():
             if i != 0:
                 layer.grad_gamma = (1/nb) * np.sum(np.multiply(G,layer.s2),axis=1,keepdims=True)
                 layer.grad_beta = (1/nb) * np.sum(G,axis=1,keepdims=True)
-                G = np.multiply(G,np.sum(layer.gamma,axis=1,keepdims=True))
+                G = np.multiply(G,layer.gamma)
                 G = layer.BatchNomBackPass(G)
 
             layer.grad_W = 1/nb * G @ layer.x.T + 2 * self.lambda_ * layer.W
-            layer.grad_b = (1/nb * np.sum(G,axis=1)).reshape(layer.d_out,1)
+            layer.grad_b = np.mean(G,axis=1,keepdims=True)
             G = layer.W.T @ G
             G = np.multiply(G,np.heaviside(layer.x,0))
             
@@ -149,13 +163,12 @@ class MLP():
 
     def update_params_batchNorm(self,eta):
 
-        for i,layer in enumerate(self.layers[:-1]):
+        for i,layer in enumerate(self.layers):
             layer.W -= eta * layer.grad_W
             layer.b -= eta * layer.grad_b
             if i != len(self.layers)-1:
                 layer.gamma -= eta * layer.grad_gamma
                 layer.beta -= eta * layer.grad_beta
-                layer.update_norm_params()
 
                 
 
@@ -253,7 +266,7 @@ class MLP():
             Y_train = Y_train.T
             for i in range(l):
                 
-                if (batchNorm):
+                if batchNorm:
                     p = self.forward_batchnorm(X_train[:,i*(n_batch):(i+1)*n_batch])
                     self.compute_gradients_batchnorm(X_train[:,i*(n_batch):(i+1)*n_batch],Y_train[:,i*(n_batch):(i+1)*n_batch],p)
                     self.update_params_batchNorm(eta)
