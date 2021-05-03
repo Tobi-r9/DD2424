@@ -71,7 +71,7 @@ class Layer():
 
 class MLP():
 
-    def __init__(self, dimensions=[3072,50,10], lambda_=0, seed=64, layer_init = 'He'):
+    def __init__(self, dimensions=[3072,50,50,10], lambda_=0, seed=64, layer_init = 'He'):
         np.random.seed(seed)
         self.seed = seed
         self.dimensions = dimensions
@@ -427,7 +427,7 @@ class LambdaSearch():
         self.sample_lambda()
         for lmda in self.lambdas:
             mlp = MLP(lambda_=lmda)
-            hist = mlp.cyclicLearning(data, GDparams, 'lambda_search', False, False)
+            hist = mlp.cyclicLearning(data, GDparams,True,'lambda_search', False, False)
             self.models.update({np.max(mlp.val_acc):mlp})
 
         return self.models
@@ -469,12 +469,3 @@ def load_network(GDparams,experiment,cyclic,cycle=-1):
 
     return layers, hist
 
-def get_test_acc(X_test,y_test,layers):
-    X_c = X_test.copy()
-    for l in layers:
-        l.x = X_c.copy()
-        X_c = np.maximum(0,l.W @ l.x + l.b)
-    p = softmax(l.W @ l.x + l.b)
-    y_hat = np.argmax(p,axis=0)
-    acc = np.sum(y_hat == y_test)
-    return acc/len(y_test)
