@@ -90,7 +90,7 @@ class MLP():
         for k in range(self.k_layers):
             d_in = self.dimensions[k]
             d_out = self.dimensions[k+1]
-            W = np.random.normal(0,1/np.sqrt(d_in),(d_out, d_in))
+            W = np.random.normal(0,2/np.sqrt(d_in),(d_out, d_in))
             b = np.zeros((d_out,1))
             grad_W = np.zeros((d_out, d_in))
             grad_b = np.zeros((d_out,1))
@@ -172,51 +172,105 @@ class MLP():
 
                 
 
-    def computeGradientsNum(self, X, Y, h=1e-5):
-        grad_bs, grad_Ws = [], []
+    def compute_gradients_num(self, X_batch, Y_batch, h=1e-5):
+        """ Numerically computes the gradients of the weight and bias parameters
+        Args:
+            X_batch (np.ndarray): data batch matrix (n_dims, n_samples)
+            Y_batch (np.ndarray): one-hot-encoding labels batch vector (n_classes, n_samples)
+            h            (float): marginal offset
+        Returns:
+            grad_W  (np.ndarray): the gradient of the weight parameter
+            grad_b  (np.ndarray): the gradient of the bias parameter
+        """
+        grads = {}
+        for j, layer in enumerate(self.layers):
+            selfW = layer.W
+            selfB = layer.b
+            grads['W' + str(j)] = np.zeros(selfW.shape)
+            grads['b' + str(j)] = np.zeros(selfB.shape)
 
-        for j in tqdm(range(self.k_layers)):
-            grad_bs.append(np.zeros(self.layers[j].d_out))
-            for i in range(self.layers[j].d_out):
+            b_try = np.copy(selfB)
+            for i in range(selfB.shape[0]):
+                layer.b = np.copy(b_try)
+                layer.b[i] += h
+                _, c1 = self.computeCost(X_batch, Y_batch,True)
+                layer.b = np.copy(b_try)
+                layer.b[i] -= h
+                _, c2 = self.computeCost(X_batch, Y_batch,True)
+                grads['b' + str(j)][i] = (c1-c2) / (2*h)
+            layer.b = b_try
 
-                self.layers[j].b[i][0] -= h
-                _,c1 = self.computeCost(X, Y)
-                self.layers[j].b[i][0] += 2 * h
-                _,c2 = self.computeCost(X, Y)
-
-                self.layers[j].b[i][0] -= h
-                grad_bs[j][i] = (c2 - c1) / (2*h)
-
-        for j in tqdm(range(self.k_layers)):
-            grad_Ws.append(np.zeros((self.layers[j].d_out, self.layers[j].d_in)))
-            for i in range(self.layers[j].d_out):
-                for l in range(self.layers[j].d_in):
-
-                    self.layers[j].W[i, l] -= h
-                    _,c1 = self.computeCost(X, Y)
-
-                    self.layers[j].W[i, l] += 2*h
-                    _,c2 = self.computeCost(X, Y)
-
-                    
-                    self.layers[j].W[i, l] -= h
-                    grad_Ws[j][i, l] = (c2 - c1) / (2*h)
-
-        return grad_Ws, grad_bs
+            W_try = np.copy(selfW)
+            for i in np.ndindex(selfW.shape):
+                layer.W = np.copy(W_try)
+                layer.W[i] += h
+                _, c1 = self.computeCost(X_batch, Y_batch,True)
+                layer.W = np.copy(W_try)
+                layer.W[i] -= h
+                _, c2 = self.computeCost(X_batch, Y_batch,True)
+                grads['W' + str(j)][i] = (c1-c2) / (2*h)
+            layer.W = W_try
 
 
-    def compareGradients(self, X, Y, eps=1e-10, h=1e-5):
-        gn_Ws, gn_bs = self.computeGradientsNum(X, Y, h)
-        rerr_w, rerr_b = [], []
-        aerr_w, aerr_b = [], []
+            selfGamma = layer.gamma
+            selfBeta = layer.beta
+            grads['gamma' + str(j)] = np.zeros(selfBeta.shape)
+            grads['beta' + str(j)] = np.zeros(selfGamma.shape)
 
-        for i in range(self.k_layers):
-            rerr_w.append(rel_error(self.layers[i].grad_W, gn_Ws[i], eps))
-            rerr_b.append(rel_error(self.layers[i].grad_b, gn_bs[i], eps))
-            aerr_w.append(np.mean(abs(self.layers[i].grad_W - gn_Ws[i])))
-            aerr_b.append(np.mean(abs(self.layers[i].grad_b - gn_bs[i])))
+            gamma_try = np.copy(selfGamma)
+            for i in range(selfGamma.shape[0]):
+                layer.gamma = np.copy(gamma_try)
+                layer.gamma[i] += h
+                _, c1 = self.computeCost(X_batch, Y_batch,True)
+                layer.gamma = np.copy(gamma_try)
+                layer.gamma[i] -= h
+                _, c2 = self.computeCost(X_batch, Y_batch,True)
+                grads['gamma' + str(j)][i] = (c1-c2) / (2*h)
+            layer.gamma = gamma_try
 
-        return rerr_w, rerr_b, aerr_w, aerr_b
+            beta_try = np.copy(selfBeta)
+            for i in range(selfBeta.shape[0]):
+                layer.beta = np.copy(beta_try)
+                layer.beta[i] += h
+                _, c1 = self.computeCost(X_batch, Y_batch,True)
+                layer.beta = np.copy(gamma_try)
+                layer.beta[i] -= h
+                _, c2 = self.computeCost(X_batch, Y_batch,True)
+                grads['beta' + str(j)][i] = (c1-c2) / (2*h)
+            layer.beta = beta_try
+
+        return grads
+
+    def compare_gradients(self, X, Y, eps=1e-10, h=1e-5, fun=np.mean):
+        """ Compares analytical and numerical gradients given a certain epsilon """
+        gn = self.compute_gradients_num(X, Y, h)
+        rerr_w, rerr_b, rerr_gamma, rerr_beta = [], [], [], []
+        aerr_w, aerr_b, aerr_gamma, aerr_beta = [], [], [], []
+
+        def _rel_error(x, y, eps): return np.abs(
+            x-y)/max(eps, np.abs(x)+np.abs(y))
+
+        def rel_error(g1, g2, eps):
+            vfunc = np.vectorize(_rel_error)
+            return fun(vfunc(g1, g2, eps))
+
+        for i, layer in enumerate(self.layers):
+            rerr_w.append(rel_error(layer.grad_W, gn[f'W{i}'], eps))
+            rerr_b.append(rel_error(layer.grad_b, gn[f'b{i}'], eps))
+            aerr_w.append(fun(abs(layer.grad_W - gn[f'W{i}'])))
+            aerr_b.append(fun(abs(layer.grad_b - gn[f'b{i}'])))
+
+            rerr_gamma.append(
+                rel_error(layer.grad_gamma, gn[f'gamma{i}'], eps))
+            rerr_beta.append(
+                rel_error(layer.grad_beta, gn[f'beta{i}'], eps))
+            aerr_gamma.append(
+                fun(abs(layer.grad_gamma - gn[f'gamma{i}'])))
+            aerr_beta.append(
+                fun(abs(layer.grad_beta - gn[f'beta{i}'])))
+
+        return rerr_w, aerr_w, rerr_b, aerr_b, rerr_gamma, aerr_gamma, rerr_beta, aerr_beta
+
 
 
     def computeCost(self, X, Y, batchNorm):
@@ -295,6 +349,8 @@ class MLP():
         hist = {'train_loss':train_loss_, 'val_loss':val_loss_, 'train_acc':train_acc_, 'val_acc':val_acc_,'train_cost':train_cost_,'val_cost':val_cost_}
         if save:
             self.save(hist,GDparams, experiment,True)
+
+        return hist
 
     def save(self, hist, GDparams, experiment,cyclic):
         n_batch = GDparams['n_batch']
