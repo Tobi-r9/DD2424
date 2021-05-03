@@ -161,7 +161,7 @@ class MLP():
             input = layer.evaluate_layer(input, train_mode, init)
         return input
 
-    def compute_cost(self, X, Y, train_mode=True, init=False):
+    def  (self, X, Y, train_mode=True, init=False):
         """ Computes the cost function: cross entropy loss + L2 regularization """
         P = self.forward_pass(X, train_mode, init)
         loss = np.log(np.sum(np.multiply(Y, P), axis=0))

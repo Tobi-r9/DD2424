@@ -71,12 +71,13 @@ class Layer():
 
 class MLP():
 
-    def __init__(self, dimensions=[3072,50,10], lambda_=0, seed=42):
+    def __init__(self, dimensions=[3072,50,10], lambda_=0, seed=64, layer_init = 'He'):
         np.random.seed(seed)
         self.seed = seed
         self.dimensions = dimensions
         self.k_layers = len(dimensions)-1
         self.lambda_ = lambda_
+        self.layer_init = layer_init
         self.layers = []
         self.init_layers()
         self.train_loss = []
@@ -85,12 +86,29 @@ class MLP():
         self.val_cost = []
         self.train_acc = []
         self.val_acc = []
+        
+
+    def he_init(self,d_in,d_out):
+        return np.random.normal(0,2/np.sqrt(d_in),(d_out, d_in))
+    
+    def xavier_init(self,d_in, d_out):
+        return np.random.normal(0,1/np.sqrt(d_in),(d_out, d_in))
+    
+    def random_init(self, d_in, d_out):
+        assert type(self.layer_init) == float
+        return np.random.normal(0,self.layer_init,(d_out, d_in))
 
     def init_layers(self):
+        if self.layer_init == 'He':
+            init_func = self.he_init
+        elif self.layer_init == 'Xavier':
+            init_func = self.xavier_init
+        elif type(self.layer_init) == float:
+            init_func = self.random_init
         for k in range(self.k_layers):
             d_in = self.dimensions[k]
             d_out = self.dimensions[k+1]
-            W = np.random.normal(0,2/np.sqrt(d_in),(d_out, d_in))
+            W = init_func(d_in,d_out)
             b = np.zeros((d_out,1))
             grad_W = np.zeros((d_out, d_in))
             grad_b = np.zeros((d_out,1))
@@ -157,7 +175,7 @@ class MLP():
 
     def update_params(self, eta):
 
-        for i,layer in enumerate(self.layers)-1:
+        for i,layer in enumerate(self.layers):
             layer.W -= eta * layer.grad_W
             layer.b -= eta * layer.grad_b
 
@@ -339,7 +357,7 @@ class MLP():
         
                 t = (t+1) % (2*ns)
 
-
+        self.history(data, t, verbose, batchNorm)
         train_loss_ = np.array(self.train_loss)
         val_loss_ = np.array(self.val_loss)
         train_acc_ = np.array(self.train_acc)
@@ -386,11 +404,6 @@ class MLP():
             print(f"\t Epoch {eps}: train_cost = {t_cost}, val_cost = {v_cost},  \n \t train_acc = {t_acc}, val_acc = {v_acc}")
 
 _rel_error = lambda x,y,eps: np.abs(x-y)/max(eps,np.abs(x)+np.abs(y))
-
-
-def rel_error(g1, g2, eps):
-    vfunc = np.vectorize(_rel_error)
-    return np.mean(vfunc(g1,g2,eps))
 
 def softmax(x):
     """ Standard definition of the softmax function """
